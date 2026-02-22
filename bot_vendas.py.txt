@@ -1,0 +1,117 @@
+import logging
+import os
+from urllib.parse import urlparse
+import requests
+from bs4 import BeautifulSoup
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
+
+# ---------------- CONFIG ----------------
+TOKEN = os.getenv("BOT_TOKEN")  # NO Pella.app: vá em Environment Variables e adicione Key: BOT_TOKEN | Value: 8469461003:AAEWgd787uDhzlpgxAXRkOKa5RieOZUJMOM
+
+# Se quiser testar localmente no seu PC (opcional), descomente a linha abaixo temporariamente:
+# TOKEN = "8469461003:AAEWgd787uDhzlpgxAXRkOKa5RieOZUJMOM"
+
+logging.basicConfig(level=logging.INFO)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Olá! Sou o @AutoArte_bot 🚀\n"
+        "Especializado em transformar links de produtos em posts matadores para grupos de vendas!\n"
+        "É só colar o link (Mercado Livre, Shopee, Amazon, etc.) que eu gero foto + texto persuasivo pra você copiar e colar nos grupos."
+    )
+
+def extract_og_data(url: str):
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        r = requests.get(url, headers=headers, timeout=12)
+        r.raise_for_status()
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        def get_meta(prop: str):
+            tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
+            return tag["content"].strip() if tag and "content" in tag.attrs else None
+
+        title       = get_meta("og:title")       or get_meta("title")      or "Produto Incrível!"
+        image       = get_meta("og:image")
+        description = get_meta("og:description") or ""
+
+        if not image:
+            image = get_meta("twitter:image")
+
+        return title, image, description
+
+    except Exception as e:
+        logging.error(f"Erro ao extrair {url}: {e}")
+        return None, None, None
+
+def criar_texto_vendas(title: str, url: str, extra_desc: str = "") -> str:
+    texto = f"🔥 {title.upper()[:80]} 🔥\n\n"
+
+    if extra_desc:
+        texto += f"{extra_desc[:150]}...\n\n"
+
+    texto += (
+        "💎 Qualidade premium • Estoque limitado!\n"
+        "🚚 Frete rápido / Entrega hoje em muitas regiões\n"
+        "💰 Preço imbatível – só hoje / enquanto durar!\n\n"
+        f"👉 CLIQUE AGORA → {url}\n\n"
+        "Corre que tá voando! 🏃‍♂️💨 #OfertaImperdivel #Promoção #AutoArte"
+    )
+    return texto
+
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text.startswith("http"):
+        await update.message.reply_text("Me manda um link válido de produto, por favor! 🔗")
+        return
+
+    await update.message.reply_text("⏳ Analisando o produto...")
+
+    title, image_url, desc = extract_og_data(text)
+
+    if not title or not image_url:
+        await update.message.reply_text(
+            "Não consegui extrair a imagem/título desse link 😕\n"
+            "Funciona melhor em Mercado Livre, Shopee, Amazon, Magalu etc. Tenta outro?"
+        )
+        return
+
+    texto_venda = criar_texto_vendas(title, text, desc)
+
+    try:
+        await update.message.reply_photo(
+            photo=image_url,
+            caption=texto_venda,
+            disable_notification=True
+        )
+    except Exception:
+        await update.message.reply_text(
+            f"Foto não carregou (alguns sites bloqueiam), mas olha o texto pronto pra copiar:\n\n{texto_venda}"
+        )
+
+def main():
+    if not TOKEN:
+        print("ERRO: BOT_TOKEN não encontrado! Configure nas variáveis de ambiente.")
+        return
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
+
+    print("Bot @AutoArte_bot iniciado! Envie um link de produto para testar.")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
